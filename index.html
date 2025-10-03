@@ -105,21 +105,21 @@
                         const text = event.target.result;
                         const lines = text.split('\n').filter(line => line.trim());
                         
-                        if (lines.length < 2) {
+                        if (lines.length === 0) {
                             setError('CSV file appears to be empty');
                             return;
                         }
 
                         const data = [];
-                        for (let i = 1; i < lines.length; i++) {
-                            const values = lines[i].split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/).map(v => v.trim().replace(/"/g, ''));
+                        // No header row - start from line 0
+                        for (let i = 0; i < lines.length; i++) {
+                            const values = lines[i].split(',').map(v => v.trim());
                             
-                            if (values.length >= 4) {
+                            if (values.length >= 3) {
                                 data.push({
                                     code: values[0],
-                                    description: values[1],
-                                    stockOnHand: values[2],
-                                    unitSize: values[3]
+                                    packSize: values[1],
+                                    description: values[2]
                                 });
                             }
                         }
@@ -142,14 +142,20 @@
             };
 
             const handleBarcodeSubmit = (code = null) => {
-                const barcodeToSearch = code || barcode.trim();
+                let barcodeToSearch = code || barcode.trim();
+                
+                // Remove leading zeros
+                barcodeToSearch = barcodeToSearch.replace(/^0+/, '');
                 
                 if (!barcodeToSearch) {
                     setError('Please enter a barcode');
                     return;
                 }
 
-                const product = products.find(p => p.code === barcodeToSearch);
+                const product = products.find(p => {
+                    const cleanCode = p.code.replace(/^0+/, '');
+                    return cleanCode === barcodeToSearch;
+                });
                 
                 if (!product) {
                     setError(`Product not found: ${barcodeToSearch}`);
@@ -158,6 +164,7 @@
                 }
 
                 setCurrentProduct(product);
+                setBarcode(barcodeToSearch);
                 setError('');
                 
                 const existing = scannedItems.find(item => item.code === barcodeToSearch);
@@ -186,10 +193,9 @@
 
                 const newItem = {
                     id: Date.now(),
-                    code: currentProduct.code,
+                    code: barcode,
                     description: currentProduct.description,
-                    unitSize: currentProduct.unitSize,
-                    stockOnHand: currentProduct.stockOnHand,
+                    packSize: currentProduct.packSize,
                     quantity: qty,
                     timestamp: new Date().toLocaleTimeString()
                 };
@@ -306,7 +312,10 @@
                                 <div className="bg-white rounded-lg shadow p-6 mb-4">
                                     <h2 className="text-xl font-bold mb-4">Upload Product Database</h2>
                                     <p className="text-gray-600 mb-4">
-                                        Upload your CSV file with columns: Product Code, Description, Stock on Hand, Unit Size
+                                        Upload your CSV file with format: Barcode, Pack Size, Description
+                                    </p>
+                                    <p className="text-sm text-gray-500 mb-4">
+                                        Example: 3574661196350,12,SAVLON SOAP ORIGINAL 12 x 175g
                                     </p>
                                     
                                     <label className="block">
@@ -346,7 +355,7 @@
                                                 <div key={i} className="text-sm border-l-4 border-blue-500 pl-3 py-2">
                                                     <div className="font-mono text-gray-600">{p.code}</div>
                                                     <div className="font-semibold">{p.description}</div>
-                                                    <div className="text-gray-500">{p.unitSize}</div>
+                                                    <div className="text-gray-500">Pack Size: {p.packSize} units</div>
                                                 </div>
                                             ))}
                                         </div>
@@ -391,7 +400,7 @@
                                             <video
                                                 ref={videoRef}
                                                 className="w-full rounded-lg mb-2"
-                                                style={{ maxHeight: '300px' }}
+                                                style={{ height: '240px', objectFit: 'cover' }}
                                             />
                                             <button
                                                 onClick={stopCamera}
@@ -418,34 +427,28 @@
                                             <div className="flex-1">
                                                 <div className="font-mono text-sm text-gray-600 mb-1">{currentProduct.code}</div>
                                                 <h3 className="text-xl font-bold text-gray-800 mb-2">{currentProduct.description}</h3>
-                                                <div className="grid grid-cols-2 gap-2 text-sm">
-                                                    <div>
-                                                        <span className="text-gray-600">Unit Size:</span>
-                                                        <span className="ml-2 font-semibold">{currentProduct.unitSize}</span>
-                                                    </div>
-                                                    <div>
-                                                        <span className="text-gray-600">System Stock:</span>
-                                                        <span className="ml-2 font-semibold">{currentProduct.stockOnHand}</span>
-                                                    </div>
+                                                <div className="text-sm">
+                                                    <span className="text-gray-600">Pack Size:</span>
+                                                    <span className="ml-2 font-semibold">{currentProduct.packSize} units</span>
                                                 </div>
                                             </div>
                                         </div>
 
                                         <div className="border-t border-green-200 pt-4">
                                             <label className="block text-sm font-semibold mb-2">Counted Quantity</label>
-                                            <div className="flex gap-2">
+                                            <div className="flex gap-2 items-stretch">
                                                 <input
                                                     type="number"
                                                     value={quantity}
                                                     onChange={(e) => setQuantity(e.target.value)}
                                                     onKeyPress={(e) => e.key === 'Enter' && handleAddCount()}
                                                     placeholder="Enter quantity"
-                                                    className="flex-1 p-3 border-2 border-gray-300 rounded-lg text-lg"
+                                                    className="w-32 p-3 border-2 border-gray-300 rounded-lg text-lg"
                                                     min="1"
                                                 />
                                                 <button
                                                     onClick={handleAddCount}
-                                                    className="px-8 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 font-bold"
+                                                    className="flex-1 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 font-bold"
                                                 >
                                                     Add
                                                 </button>
@@ -476,17 +479,17 @@
                         {page === 'history' && (
                             <div className="max-w-4xl mx-auto space-y-4">
                                 <div className="bg-white rounded-lg shadow p-4">
-                                    <div className="flex gap-2 mb-4">
+                                    <div className="flex flex-col gap-2 mb-4">
                                         <input
                                             type="text"
                                             value={searchTerm}
                                             onChange={(e) => setSearchTerm(e.target.value)}
                                             placeholder="Search by product or barcode..."
-                                            className="flex-1 p-3 border-2 border-gray-300 rounded-lg"
+                                            className="w-full p-3 border-2 border-gray-300 rounded-lg"
                                         />
                                         <button
                                             onClick={handleExport}
-                                            className="px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 flex items-center gap-2"
+                                            className="w-full py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 flex items-center justify-center gap-2 font-semibold"
                                         >
                                             <i data-lucide="download"></i>
                                             Export
@@ -515,7 +518,7 @@
                                                     <div className="font-mono text-xs text-gray-500 mb-1">{item.code}</div>
                                                     <div className="font-semibold mb-1">{item.description}</div>
                                                     <div className="text-sm text-gray-600">
-                                                        {item.unitSize} • System: {item.stockOnHand} • {item.timestamp}
+                                                        Pack Size: {item.packSize} • {item.timestamp}
                                                     </div>
                                                 </div>
 
@@ -585,5 +588,4 @@
         ReactDOM.render(<StockTakeApp />, document.getElementById('root'));
     </script>
 </body>
-
 </html>
