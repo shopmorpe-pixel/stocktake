@@ -17,6 +17,9 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
+        // CLOUD CSV URL - Update this when you change your CSV
+        const CLOUD_CSV_URL = 'https://drive.google.com/uc?export=download&id=1vbnMCQfSUEk7ISfjN1lgGPGXLf9EFXLO';
+
         function StockTakeApp() {
             const [page, setPage] = useState('setup');
             const [products, setProducts] = useState([]);
@@ -29,19 +32,34 @@
             const [searchTerm, setSearchTerm] = useState('');
             const [error, setError] = useState('');
             const [scanning, setScanning] = useState(false);
+            const [loading, setLoading] = useState(true);
+            const [loadingMessage, setLoadingMessage] = useState('Loading products from cloud...');
             const barcodeInputRef = useRef(null);
             const videoRef = useRef(null);
             const streamRef = useRef(null);
             const codeReaderRef = useRef(null);
 
             useEffect(() => {
-                const saved = localStorage.getItem('stocktake_products');
-                if (saved) {
-                    setProducts(JSON.parse(saved));
-                }
+                // Load saved scans
                 const savedScans = localStorage.getItem('stocktake_scans');
                 if (savedScans) {
                     setScannedItems(JSON.parse(savedScans));
+                }
+
+                // Check if products are already cached
+                const savedProducts = localStorage.getItem('stocktake_products');
+                const lastUpdate = localStorage.getItem('stocktake_last_update');
+                const now = new Date().getTime();
+                const oneHour = 60 * 60 * 1000;
+
+                // Use cached products if less than 1 hour old
+                if (savedProducts && lastUpdate && (now - parseInt(lastUpdate)) < oneHour) {
+                    setProducts(JSON.parse(savedProducts));
+                    setLoading(false);
+                    setPage('scan');
+                } else {
+                    // Load from cloud
+                    loadProductsFromCloud();
                 }
             }, []);
 
@@ -50,6 +68,102 @@
                     stopCamera();
                 };
             }, []);
+
+            const loadProductsFromCloud = async () => {
+                try {
+                    setLoading(true);
+                    setLoadingMessage('Downloading product database...');
+
+                    const response = await fetch(CLOUD_CSV_URL);
+                    if (!response.ok) {
+                        throw new Error('Failed to download CSV');
+                    }
+
+                    const text = await response.text();
+                    const lines = text.split('\n').filter(line => line.trim());
+
+                    if (lines.length === 0) {
+                        throw new Error('CSV file is empty');
+                    }
+
+                    setLoadingMessage('Processing products...');
+
+                    const data = [];
+                    for (let i = 0; i < lines.length; i++) {
+                        const values = lines[i].split(',').map(v => v.trim());
+                        
+                        if (values.length >= 3) {
+                            data.push({
+                                code: values[0],
+                                packSize: values[1],
+                                description: values[2]
+                            });
+                        }
+                    }
+
+                    if (data.length === 0) {
+                        throw new Error('No valid products found');
+                    }
+
+                    setProducts(data);
+                    localStorage.setItem('stocktake_products', JSON.stringify(data));
+                    localStorage.setItem('stocktake_last_update', new Date().getTime().toString());
+                    setLoading(false);
+                    setPage('scan');
+                    setLoadingMessage(`Successfully loaded ${data.length} products!`);
+                    setTimeout(() => setLoadingMessage(''), 3000);
+                } catch (err) {
+                    setLoading(false);
+                    setError('Failed to load products from cloud. Please check your internet connection or reload manually.');
+                    console.error('Error loading products:', err);
+                }
+            };
+
+            const handleManualUpload = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    try {
+                        const text = event.target.result;
+                        const lines = text.split('\n').filter(line => line.trim());
+                        
+                        if (lines.length === 0) {
+                            setError('CSV file appears to be empty');
+                            return;
+                        }
+
+                        const data = [];
+                        for (let i = 0; i < lines.length; i++) {
+                            const values = lines[i].split(',').map(v => v.trim());
+                            
+                            if (values.length >= 3) {
+                                data.push({
+                                    code: values[0],
+                                    packSize: values[1],
+                                    description: values[2]
+                                });
+                            }
+                        }
+
+                        if (data.length === 0) {
+                            setError('No valid product data found in CSV');
+                            return;
+                        }
+
+                        setProducts(data);
+                        localStorage.setItem('stocktake_products', JSON.stringify(data));
+                        localStorage.setItem('stocktake_last_update', new Date().getTime().toString());
+                        setError('');
+                        alert(`Successfully loaded ${data.length} products!`);
+                        setPage('scan');
+                    } catch (err) {
+                        setError('Error parsing CSV file. Please check the format.');
+                    }
+                };
+                reader.readAsText(file);
+            };
 
             const startCamera = async () => {
                 try {
@@ -95,56 +209,9 @@
                 setScanning(false);
             };
 
-            const handleFileUpload = (e) => {
-                const file = e.target.files[0];
-                if (!file) return;
-
-                const reader = new FileReader();
-                reader.onload = (event) => {
-                    try {
-                        const text = event.target.result;
-                        const lines = text.split('\n').filter(line => line.trim());
-                        
-                        if (lines.length === 0) {
-                            setError('CSV file appears to be empty');
-                            return;
-                        }
-
-                        const data = [];
-                        // No header row - start from line 0
-                        for (let i = 0; i < lines.length; i++) {
-                            const values = lines[i].split(',').map(v => v.trim());
-                            
-                            if (values.length >= 3) {
-                                data.push({
-                                    code: values[0],
-                                    packSize: values[1],
-                                    description: values[2]
-                                });
-                            }
-                        }
-
-                        if (data.length === 0) {
-                            setError('No valid product data found in CSV');
-                            return;
-                        }
-
-                        setProducts(data);
-                        localStorage.setItem('stocktake_products', JSON.stringify(data));
-                        setError('');
-                        alert(`Successfully loaded ${data.length} products!`);
-                        setPage('scan');
-                    } catch (err) {
-                        setError('Error parsing CSV file. Please check the format.');
-                    }
-                };
-                reader.readAsText(file);
-            };
-
             const handleBarcodeSubmit = (code = null) => {
                 let barcodeToSearch = code || barcode.trim();
                 
-                // Remove leading zeros
                 barcodeToSearch = barcodeToSearch.replace(/^0+/, '');
                 
                 if (!barcodeToSearch) {
@@ -264,6 +331,20 @@
                 lucide.createIcons();
             });
 
+            if (loading) {
+                return (
+                    <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+                        <div className="text-center">
+                            <div className="mb-4">
+                                <i data-lucide="loader" className="w-16 h-16 text-blue-600 mx-auto animate-spin"></i>
+                            </div>
+                            <h2 className="text-2xl font-bold text-gray-800 mb-2">Stock Take Scanner</h2>
+                            <p className="text-gray-600">{loadingMessage}</p>
+                        </div>
+                    </div>
+                );
+            }
+
             return (
                 <div className="min-h-screen bg-gray-50">
                     <div className="bg-blue-600 text-white p-4 shadow-lg">
@@ -289,7 +370,6 @@
                                 className={`flex-1 p-4 flex items-center justify-center gap-2 ${
                                     page === 'scan' ? 'bg-blue-50 text-blue-600 border-b-2 border-blue-600' : 'text-gray-600'
                                 }`}
-                                disabled={products.length === 0}
                             >
                                 <i data-lucide="search"></i>
                                 Scan
@@ -310,39 +390,43 @@
                         {page === 'setup' && (
                             <div className="max-w-2xl mx-auto">
                                 <div className="bg-white rounded-lg shadow p-6 mb-4">
-                                    <h2 className="text-xl font-bold mb-4">Upload Product Database</h2>
-                                    <p className="text-gray-600 mb-4">
-                                        Upload your CSV file with format: Barcode, Pack Size, Description
-                                    </p>
-                                    <p className="text-sm text-gray-500 mb-4">
-                                        Example: 3574661196350,12,SAVLON SOAP ORIGINAL 12 x 175g
-                                    </p>
+                                    <h2 className="text-xl font-bold mb-4">Product Database</h2>
                                     
-                                    <label className="block">
-                                        <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center hover:border-blue-500 cursor-pointer">
-                                            <div className="flex justify-center mb-4">
-                                                <i data-lucide="upload" className="w-12 h-12 text-gray-400"></i>
-                                            </div>
-                                            <p className="text-gray-600 mb-2">Click to upload CSV file</p>
-                                            <p className="text-sm text-gray-400">or drag and drop</p>
-                                            <input
-                                                type="file"
-                                                accept=".csv,.txt"
-                                                onChange={handleFileUpload}
-                                                className="hidden"
-                                            />
+                                    {products.length > 0 && (
+                                        <div className="mb-4 bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded">
+                                            ✓ {products.length} products loaded from cloud
                                         </div>
-                                    </label>
+                                    )}
+
+                                    <button
+                                        onClick={loadProductsFromCloud}
+                                        className="w-full mb-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-semibold flex items-center justify-center gap-2"
+                                    >
+                                        <i data-lucide="refresh-cw"></i>
+                                        Reload from Cloud
+                                    </button>
+
+                                    <div className="border-t pt-4">
+                                        <p className="text-sm text-gray-600 mb-3">Or manually upload a CSV file:</p>
+                                        <label className="block">
+                                            <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-blue-500 cursor-pointer">
+                                                <div className="flex justify-center mb-3">
+                                                    <i data-lucide="upload" className="w-10 h-10 text-gray-400"></i>
+                                                </div>
+                                                <p className="text-gray-600 text-sm">Click to upload CSV manually</p>
+                                                <input
+                                                    type="file"
+                                                    accept=".csv,.txt"
+                                                    onChange={handleManualUpload}
+                                                    className="hidden"
+                                                />
+                                            </div>
+                                        </label>
+                                    </div>
 
                                     {error && (
                                         <div className="mt-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
                                             {error}
-                                        </div>
-                                    )}
-
-                                    {products.length > 0 && (
-                                        <div className="mt-4 bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded">
-                                            ✓ {products.length} products loaded successfully
                                         </div>
                                     )}
                                 </div>
