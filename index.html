@@ -16,7 +16,8 @@
     <script type="text/babel">
         const { useState, useEffect } = React;
 
-        const CLOUD_CSV_URL = 'https://gist.githubusercontent.com/shopmorpe-pixel/83be8e1d68d25078ed3aa2de92d7f8d2/raw/fe579f64b886f0e4c73b39fa27890476fc52b12c/PRODUCTS.CSV';
+        // NO AUTO-LOAD - Manual upload only for desktop review
+        const CLOUD_CSV_URL = null;
 
         function StockReviewApp() {
             const [products, setProducts] = useState([]);
@@ -36,32 +37,8 @@
             }, []);
 
             const loadProductDatabase = async () => {
-                try {
-                    setLoading(true);
-                    const response = await fetch(CLOUD_CSV_URL);
-                    if (!response.ok) throw new Error('Failed to load database');
-
-                    const text = await response.text();
-                    const lines = text.split('\n').filter(line => line.trim());
-
-                    const data = [];
-                    for (let i = 0; i < lines.length; i++) {
-                        const values = lines[i].split(',').map(v => v.trim());
-                        if (values.length >= 3) {
-                            data.push({
-                                code: values[0],
-                                packSize: values[1],
-                                description: values[2]
-                            });
-                        }
-                    }
-
-                    setProducts(data);
-                    setLoading(false);
-                } catch (err) {
-                    setError('Failed to load product database');
-                    setLoading(false);
-                }
+                // Manual upload only - no auto-load for desktop review app
+                setLoading(false);
             };
 
             const loadSavedCounts = () => {
@@ -141,6 +118,38 @@
                         notFound: notFoundCount
                     }
                 };
+            };
+
+            const handleDatabaseUpload = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    try {
+                        const text = event.target.result;
+                        const lines = text.split('\n').filter(line => line.trim());
+
+                        const data = [];
+                        for (let i = 0; i < lines.length; i++) {
+                            const values = lines[i].split(',').map(v => v.trim());
+                            if (values.length >= 3) {
+                                data.push({
+                                    code: values[0],
+                                    packSize: values[1],
+                                    description: values[2]
+                                });
+                            }
+                        }
+
+                        setProducts(data);
+                        setError('');
+                        alert(`Database loaded: ${data.length} products`);
+                    } catch (err) {
+                        setError('Error loading database');
+                    }
+                };
+                reader.readAsText(file);
             };
 
             const handleFileUpload = (e) => {
