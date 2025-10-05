@@ -3,95 +3,50 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Stock Take Scanner</title>
+    <title>Stock Count Review - Desktop</title>
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://unpkg.com/@zxing/library@latest"></script>
 </head>
 <body>
     <div id="root"></div>
 
     <script type="text/babel">
-        const { useState, useEffect, useRef } = React;
+        const { useState, useEffect } = React;
 
-        // CLOUD CSV URL - Update this when you change your CSV
-        const CLOUD_CSV_URL = 'https://gist.githubusercontent.com/shopmorpe-pixel/83be8e1d68d25078ed3aa2de92d7f8d2/raw/2b3ffc296c6146a39aecadf0b1562439cd455045/gistfile1.txt';
+        const CLOUD_CSV_URL = 'https://gist.githubusercontent.com/shopmorpe-pixel/83be8e1d68d25078ed3aa2de92d7f8d2/raw/fe579f64b886f0e4c73b39fa27890476fc52b12c/PRODUCTS.CSV';
 
-        function StockTakeApp() {
-            const [page, setPage] = useState('setup');
+        function StockReviewApp() {
             const [products, setProducts] = useState([]);
-            const [scannedItems, setScannedItems] = useState([]);
-            const [barcode, setBarcode] = useState('');
-            const [quantity, setQuantity] = useState('');
-            const [currentProduct, setCurrentProduct] = useState(null);
-            const [editingId, setEditingId] = useState(null);
-            const [editQuantity, setEditQuantity] = useState('');
-            const [searchTerm, setSearchTerm] = useState('');
-            const [error, setError] = useState('');
-            const [scanning, setScanning] = useState(false);
+            const [counts, setCounts] = useState([]);
+            const [selectedCount, setSelectedCount] = useState(null);
             const [loading, setLoading] = useState(true);
-            const [loadingMessage, setLoadingMessage] = useState('Loading products from cloud...');
-            const barcodeInputRef = useRef(null);
-            const videoRef = useRef(null);
-            const streamRef = useRef(null);
-            const codeReaderRef = useRef(null);
+            const [error, setError] = useState('');
+            const [searchTerm, setSearchTerm] = useState('');
+            const [filterType, setFilterType] = useState('all');
+            const [showUploadModal, setShowUploadModal] = useState(false);
+            const [personName, setPersonName] = useState('');
+            const [countNumber, setCountNumber] = useState('1');
 
             useEffect(() => {
-                // Load saved scans
-                const savedScans = localStorage.getItem('stocktake_scans');
-                if (savedScans) {
-                    setScannedItems(JSON.parse(savedScans));
-                }
-
-                // Check if products are already cached
-                const savedProducts = localStorage.getItem('stocktake_products');
-                const lastUpdate = localStorage.getItem('stocktake_last_update');
-                const now = new Date().getTime();
-                const oneHour = 60 * 60 * 1000;
-
-                // Use cached products if less than 1 hour old
-                if (savedProducts && lastUpdate && (now - parseInt(lastUpdate)) < oneHour) {
-                    setProducts(JSON.parse(savedProducts));
-                    setLoading(false);
-                    setPage('scan');
-                } else {
-                    // Load from cloud
-                    loadProductsFromCloud();
-                }
+                loadProductDatabase();
+                loadSavedCounts();
             }, []);
 
-            useEffect(() => {
-                return () => {
-                    stopCamera();
-                };
-            }, []);
-
-            const loadProductsFromCloud = async () => {
+            const loadProductDatabase = async () => {
                 try {
                     setLoading(true);
-                    setLoadingMessage('Downloading product database...');
-
                     const response = await fetch(CLOUD_CSV_URL);
-                    if (!response.ok) {
-                        throw new Error('Failed to download CSV');
-                    }
+                    if (!response.ok) throw new Error('Failed to load database');
 
                     const text = await response.text();
                     const lines = text.split('\n').filter(line => line.trim());
 
-                    if (lines.length === 0) {
-                        throw new Error('CSV file is empty');
-                    }
-
-                    setLoadingMessage('Processing products...');
-
                     const data = [];
                     for (let i = 0; i < lines.length; i++) {
                         const values = lines[i].split(',').map(v => v.trim());
-                        
                         if (values.length >= 3) {
                             data.push({
                                 code: values[0],
@@ -101,231 +56,241 @@
                         }
                     }
 
-                    if (data.length === 0) {
-                        throw new Error('No valid products found');
-                    }
-
                     setProducts(data);
-                    localStorage.setItem('stocktake_products', JSON.stringify(data));
-                    localStorage.setItem('stocktake_last_update', new Date().getTime().toString());
                     setLoading(false);
-                    setPage('scan');
-                    setLoadingMessage(`Successfully loaded ${data.length} products!`);
-                    setTimeout(() => setLoadingMessage(''), 3000);
                 } catch (err) {
+                    setError('Failed to load product database');
                     setLoading(false);
-                    setError('Failed to load products from cloud. Please check your internet connection or reload manually.');
-                    console.error('Error loading products:', err);
                 }
             };
 
-            const handleManualUpload = (e) => {
+            const loadSavedCounts = () => {
+                const saved = localStorage.getItem('stock_review_counts');
+                if (saved) {
+                    setCounts(JSON.parse(saved));
+                }
+            };
+
+            const saveCounts = (newCounts) => {
+                localStorage.setItem('stock_review_counts', JSON.stringify(newCounts));
+            };
+
+            const processCountFile = (text, personName, countNumber) => {
+                const lines = text.split('\n').filter(line => line.trim());
+                const items = [];
+                let errorCount = 0;
+                let notFoundCount = 0;
+                let validCount = 0;
+
+                for (let i = 0; i < lines.length; i++) {
+                    const parts = lines[i].split(',');
+                    let barcode = parts[0] ? parts[0].trim() : '';
+                    const quantity = parts[1] ? parts[1].trim() : '';
+
+                    barcode = barcode.replace(/^0+/, '');
+
+                    let errorType = null;
+                    let errorMessage = '';
+
+                    if (!quantity || quantity === '') {
+                        errorType = 'missing_quantity';
+                        errorMessage = 'Missing quantity';
+                        errorCount++;
+                    } else if (isNaN(quantity) || parseInt(quantity) < 0) {
+                        errorType = 'invalid_quantity';
+                        errorMessage = 'Invalid quantity';
+                        errorCount++;
+                    }
+
+                    const product = products.find(p => {
+                        const cleanCode = p.code.replace(/^0+/, '');
+                        return cleanCode === barcode;
+                    });
+
+                    if (!product) {
+                        errorType = 'not_found';
+                        errorMessage = 'Product not found';
+                        notFoundCount++;
+                    }
+
+                    if (!errorType) validCount++;
+
+                    items.push({
+                        id: i,
+                        barcode: barcode,
+                        originalBarcode: parts[0] ? parts[0].trim() : '',
+                        quantity: quantity,
+                        errorType: errorType,
+                        errorMessage: errorMessage,
+                        description: product ? product.description : 'UNKNOWN PRODUCT',
+                        packSize: product ? product.packSize : '-',
+                        lineNumber: i + 1
+                    });
+                }
+
+                return {
+                    id: Date.now(),
+                    personName,
+                    countNumber,
+                    uploadDate: new Date().toLocaleString(),
+                    items,
+                    stats: {
+                        total: items.length,
+                        valid: validCount,
+                        errors: errorCount,
+                        notFound: notFoundCount
+                    }
+                };
+            };
+
+            const handleFileUpload = (e) => {
                 const file = e.target.files[0];
                 if (!file) return;
+
+                if (!personName.trim()) {
+                    alert('Please enter person name');
+                    return;
+                }
 
                 const reader = new FileReader();
                 reader.onload = (event) => {
                     try {
-                        const text = event.target.result;
-                        const lines = text.split('\n').filter(line => line.trim());
-                        
-                        if (lines.length === 0) {
-                            setError('CSV file appears to be empty');
-                            return;
-                        }
-
-                        const data = [];
-                        for (let i = 0; i < lines.length; i++) {
-                            const values = lines[i].split(',').map(v => v.trim());
-                            
-                            if (values.length >= 3) {
-                                data.push({
-                                    code: values[0],
-                                    packSize: values[1],
-                                    description: values[2]
-                                });
-                            }
-                        }
-
-                        if (data.length === 0) {
-                            setError('No valid product data found in CSV');
-                            return;
-                        }
-
-                        setProducts(data);
-                        localStorage.setItem('stocktake_products', JSON.stringify(data));
-                        localStorage.setItem('stocktake_last_update', new Date().getTime().toString());
-                        setError('');
-                        alert(`Successfully loaded ${data.length} products!`);
-                        setPage('scan');
+                        const newCount = processCountFile(event.target.result, personName, countNumber);
+                        const updatedCounts = [...counts, newCount];
+                        setCounts(updatedCounts);
+                        saveCounts(updatedCounts);
+                        setSelectedCount(newCount);
+                        setShowUploadModal(false);
+                        setPersonName('');
+                        setCountNumber('1');
                     } catch (err) {
-                        setError('Error parsing CSV file. Please check the format.');
+                        alert('Error processing file');
                     }
                 };
                 reader.readAsText(file);
             };
 
-            const startCamera = async () => {
-                try {
-                    setScanning(true);
-                    setError('');
+            const deleteCount = (id) => {
+                if (!confirm('Delete this count?')) return;
+                const updated = counts.filter(c => c.id !== id);
+                setCounts(updated);
+                saveCounts(updated);
+                if (selectedCount && selectedCount.id === id) {
+                    setSelectedCount(null);
+                }
+            };
 
-                    const stream = await navigator.mediaDevices.getUserMedia({
-                        video: { facingMode: 'environment' }
-                    });
+            const exportAllCounts = () => {
+                if (counts.length === 0) {
+                    alert('No counts to export');
+                    return;
+                }
 
-                    if (videoRef.current) {
-                        videoRef.current.srcObject = stream;
-                        streamRef.current = stream;
-                        
-                        await videoRef.current.play();
-
-                        const codeReader = new ZXing.BrowserMultiFormatReader();
-                        codeReaderRef.current = codeReader;
-
-                        codeReader.decodeFromVideoDevice(null, videoRef.current, (result, err) => {
-                            if (result) {
-                                const scannedCode = result.getText();
-                                setBarcode(scannedCode);
-                                stopCamera();
-                                handleBarcodeSubmit(scannedCode);
+                // Combine all valid items from all counts
+                const allItems = {};
+                
+                counts.forEach(count => {
+                    count.items.forEach(item => {
+                        if (!item.errorType && item.quantity) {
+                            const code = item.originalBarcode;
+                            const qty = parseInt(item.quantity);
+                            
+                            if (allItems[code]) {
+                                allItems[code] += qty;
+                            } else {
+                                allItems[code] = qty;
                             }
-                        });
-                    }
-                } catch (err) {
-                    setError('Camera access denied. Please enable camera permissions or enter barcode manually.');
-                    setScanning(false);
-                }
-            };
-
-            const stopCamera = () => {
-                if (streamRef.current) {
-                    streamRef.current.getTracks().forEach(track => track.stop());
-                    streamRef.current = null;
-                }
-                if (codeReaderRef.current) {
-                    codeReaderRef.current.reset();
-                }
-                setScanning(false);
-            };
-
-            const handleBarcodeSubmit = (code = null) => {
-                let barcodeToSearch = code || barcode.trim();
-                
-                barcodeToSearch = barcodeToSearch.replace(/^0+/, '');
-                
-                if (!barcodeToSearch) {
-                    setError('Please enter a barcode');
-                    return;
-                }
-
-                const product = products.find(p => {
-                    const cleanCode = p.code.replace(/^0+/, '');
-                    return cleanCode === barcodeToSearch;
+                        }
+                    });
                 });
-                
-                if (!product) {
-                    setError(`Product not found: ${barcodeToSearch}`);
-                    setCurrentProduct(null);
-                    return;
-                }
 
-                setCurrentProduct(product);
-                setBarcode(barcodeToSearch);
-                setError('');
-                
-                const existing = scannedItems.find(item => item.code === barcodeToSearch);
-                if (existing) {
-                    setError(`Warning: ${product.description} already counted (${existing.quantity} units)`);
-                }
-            };
+                const text = Object.entries(allItems)
+                    .map(([code, qty]) => `${code},${qty}`)
+                    .join('\n');
 
-            const handleAddCount = () => {
-                if (!currentProduct) {
-                    setError('Please scan a product first');
-                    return;
-                }
-
-                const qty = parseInt(quantity);
-                if (!quantity || isNaN(qty) || qty <= 0) {
-                    setError('Please enter a valid quantity');
-                    return;
-                }
-
-                if (qty > 9999) {
-                    if (!confirm(`Are you sure the quantity is ${qty}? This seems unusually high.`)) {
-                        return;
-                    }
-                }
-
-                const newItem = {
-                    id: Date.now(),
-                    code: barcode,
-                    description: currentProduct.description,
-                    packSize: currentProduct.packSize,
-                    quantity: qty,
-                    timestamp: new Date().toLocaleTimeString()
-                };
-
-                const updated = [newItem, ...scannedItems];
-                setScannedItems(updated);
-                localStorage.setItem('stocktake_scans', JSON.stringify(updated));
-
-                setBarcode('');
-                setQuantity('');
-                setCurrentProduct(null);
-                setError('');
-                
-                if (barcodeInputRef.current) {
-                    barcodeInputRef.current.focus();
-                }
-            };
-
-            const handleEdit = (id, newQty) => {
-                const qty = parseInt(newQty);
-                if (isNaN(qty) || qty <= 0) return;
-
-                const updated = scannedItems.map(item => 
-                    item.id === id ? { ...item, quantity: qty } : item
-                );
-                setScannedItems(updated);
-                localStorage.setItem('stocktake_scans', JSON.stringify(updated));
-                setEditingId(null);
-            };
-
-            const handleDelete = (id) => {
-                if (!confirm('Delete this entry?')) return;
-                const updated = scannedItems.filter(item => item.id !== id);
-                setScannedItems(updated);
-                localStorage.setItem('stocktake_scans', JSON.stringify(updated));
-            };
-
-            const handleExport = () => {
-                if (scannedItems.length === 0) {
-                    alert('No items to export');
-                    return;
-                }
-
-                const text = scannedItems.map(item => `${item.code},${item.quantity}`).join('\n');
                 const blob = new Blob([text], { type: 'text/plain' });
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.href = url;
-                a.download = `stocktake_${new Date().toISOString().split('T')[0]}.txt`;
+                a.download = `consolidated_count_${new Date().toISOString().split('T')[0]}.txt`;
                 a.click();
                 URL.revokeObjectURL(url);
             };
 
-            const clearAllData = () => {
-                if (!confirm('Clear all scanned items? This cannot be undone.')) return;
-                setScannedItems([]);
-                localStorage.removeItem('stocktake_scans');
+            const exportErrors = (count) => {
+                const errorItems = count.items.filter(item => item.errorType !== null);
+                if (errorItems.length === 0) {
+                    alert('No errors in this count');
+                    return;
+                }
+
+                const text = errorItems.map(item => 
+                    `Line ${item.lineNumber}: ${item.originalBarcode},${item.quantity} - ${item.errorMessage} - ${item.description}`
+                ).join('\n');
+
+                const blob = new Blob([text], { type: 'text/plain' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `errors_${count.personName}_count${count.countNumber}.txt`;
+                a.click();
+                URL.revokeObjectURL(url);
             };
 
-            const filteredItems = scannedItems.filter(item =>
-                item.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                item.code.includes(searchTerm)
-            );
+            const exportSingleCount = (count) => {
+                const validItems = count.items.filter(item => !item.errorType && item.quantity);
+                const text = validItems.map(item => `${item.originalBarcode},${item.quantity}`).join('\n');
+
+                const blob = new Blob([text], { type: 'text/plain' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `${count.personName}_count${count.countNumber}.txt`;
+                a.click();
+                URL.revokeObjectURL(url);
+            };
+
+            const getFilteredItems = () => {
+                if (!selectedCount) return [];
+                
+                let filtered = [...selectedCount.items];
+
+                if (searchTerm) {
+                    filtered = filtered.filter(item =>
+                        item.barcode.includes(searchTerm) ||
+                        item.description.toLowerCase().includes(searchTerm.toLowerCase())
+                    );
+                }
+
+                if (filterType === 'errors') {
+                    filtered = filtered.filter(item => item.errorType !== null);
+                } else if (filterType === 'valid') {
+                    filtered = filtered.filter(item => item.errorType === null);
+                } else if (filterType === 'missing_qty') {
+                    filtered = filtered.filter(item => item.errorType === 'missing_quantity' || item.errorType === 'invalid_quantity');
+                } else if (filterType === 'not_found') {
+                    filtered = filtered.filter(item => item.errorType === 'not_found');
+                }
+
+                return filtered;
+            };
+
+            const getRowColor = (item) => {
+                if (item.errorType === 'missing_quantity' || item.errorType === 'invalid_quantity') {
+                    return 'bg-red-50 border-red-500';
+                } else if (item.errorType === 'not_found') {
+                    return 'bg-yellow-50 border-yellow-500';
+                }
+                return 'bg-white border-gray-200';
+            };
+
+            const getTotalStats = () => {
+                const total = counts.reduce((sum, c) => sum + c.stats.total, 0);
+                const valid = counts.reduce((sum, c) => sum + c.stats.valid, 0);
+                const errors = counts.reduce((sum, c) => sum + c.stats.errors, 0);
+                const notFound = counts.reduce((sum, c) => sum + c.stats.notFound, 0);
+                return { total, valid, errors, notFound };
+            };
 
             useEffect(() => {
                 lucide.createIcons();
@@ -333,343 +298,310 @@
 
             if (loading) {
                 return (
-                    <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+                    <div className="min-h-screen bg-gray-100 flex items-center justify-center">
                         <div className="text-center">
                             <div className="mb-4">
                                 <i data-lucide="loader" className="w-16 h-16 text-blue-600 mx-auto animate-spin"></i>
                             </div>
-                            <h2 className="text-2xl font-bold text-gray-800 mb-2">Stock Take Scanner</h2>
-                            <p className="text-gray-600">{loadingMessage}</p>
+                            <h2 className="text-2xl font-bold text-gray-800">Loading...</h2>
                         </div>
                     </div>
                 );
             }
 
-            return (
-                <div className="min-h-screen bg-gray-50">
-                    <div className="bg-blue-600 text-white p-4 shadow-lg">
-                        <h1 className="text-2xl font-bold">Stock Take Scanner</h1>
-                        <p className="text-sm text-blue-100">
-                            {products.length} products loaded | {scannedItems.length} items counted
-                        </p>
-                    </div>
+            const filteredItems = getFilteredItems();
+            const totalStats = getTotalStats();
 
-                    <div className="bg-white border-b sticky top-0 z-10">
-                        <div className="flex">
-                            <button
-                                onClick={() => setPage('setup')}
-                                className={`flex-1 p-4 flex items-center justify-center gap-2 ${
-                                    page === 'setup' ? 'bg-blue-50 text-blue-600 border-b-2 border-blue-600' : 'text-gray-600'
-                                }`}
-                            >
-                                <i data-lucide="upload"></i>
-                                Setup
-                            </button>
-                            <button
-                                onClick={() => setPage('scan')}
-                                className={`flex-1 p-4 flex items-center justify-center gap-2 ${
-                                    page === 'scan' ? 'bg-blue-50 text-blue-600 border-b-2 border-blue-600' : 'text-gray-600'
-                                }`}
-                            >
-                                <i data-lucide="search"></i>
-                                Scan
-                            </button>
-                            <button
-                                onClick={() => setPage('history')}
-                                className={`flex-1 p-4 flex items-center justify-center gap-2 ${
-                                    page === 'history' ? 'bg-blue-50 text-blue-600 border-b-2 border-blue-600' : 'text-gray-600'
-                                }`}
-                            >
-                                <i data-lucide="history"></i>
-                                History ({scannedItems.length})
-                            </button>
+            return (
+                <div className="min-h-screen bg-gray-100">
+                    <div className="bg-blue-600 text-white p-6 shadow-lg">
+                        <div className="max-w-7xl mx-auto flex justify-between items-center">
+                            <div>
+                                <h1 className="text-3xl font-bold">Stock Count Review System</h1>
+                                <p className="text-blue-100 mt-1">Manage multiple counts and validate stock takes</p>
+                            </div>
+                            <div className="text-right">
+                                <div className="text-sm text-blue-100">Product Database</div>
+                                <div className="text-2xl font-bold">{products.length} products</div>
+                            </div>
                         </div>
                     </div>
 
-                    <div className="p-4">
-                        {page === 'setup' && (
-                            <div className="max-w-2xl mx-auto">
-                                <div className="bg-white rounded-lg shadow p-6 mb-4">
-                                    <h2 className="text-xl font-bold mb-4">Product Database</h2>
-                                    
-                                    {products.length > 0 && (
-                                        <div className="mb-4 bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded">
-                                            ✓ {products.length} products loaded from cloud
-                                        </div>
-                                    )}
+                    <div className="max-w-7xl mx-auto p-6">
+                        <div className="grid grid-cols-12 gap-6">
+                            {/* Left Sidebar - Count List */}
+                            <div className="col-span-3 space-y-4">
+                                <button
+                                    onClick={() => setShowUploadModal(true)}
+                                    className="w-full py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 font-semibold flex items-center justify-center gap-2"
+                                >
+                                    <i data-lucide="plus"></i>
+                                    Upload New Count
+                                </button>
 
+                                {counts.length > 0 && (
                                     <button
-                                        onClick={loadProductsFromCloud}
-                                        className="w-full mb-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-semibold flex items-center justify-center gap-2"
+                                        onClick={exportAllCounts}
+                                        className="w-full py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-semibold flex items-center justify-center gap-2"
                                     >
-                                        <i data-lucide="refresh-cw"></i>
-                                        Reload from Cloud
+                                        <i data-lucide="download"></i>
+                                        Export All (Merged)
                                     </button>
+                                )}
 
-                                    <div className="border-t pt-4">
-                                        <p className="text-sm text-gray-600 mb-3">Or manually upload a CSV file:</p>
-                                        <label className="block">
-                                            <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-blue-500 cursor-pointer">
-                                                <div className="flex justify-center mb-3">
-                                                    <i data-lucide="upload" className="w-10 h-10 text-gray-400"></i>
-                                                </div>
-                                                <p className="text-gray-600 text-sm">Click to upload CSV manually</p>
-                                                <input
-                                                    type="file"
-                                                    accept=".csv,.txt"
-                                                    onChange={handleManualUpload}
-                                                    className="hidden"
-                                                />
+                                {/* Overall Stats */}
+                                {counts.length > 0 && (
+                                    <div className="bg-white rounded-lg shadow p-4">
+                                        <h3 className="font-bold mb-3">Overall Statistics</h3>
+                                        <div className="space-y-2 text-sm">
+                                            <div className="flex justify-between">
+                                                <span className="text-gray-600">Total Counts:</span>
+                                                <span className="font-bold">{counts.length}</span>
                                             </div>
-                                        </label>
-                                    </div>
-
-                                    {error && (
-                                        <div className="mt-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
-                                            {error}
-                                        </div>
-                                    )}
-                                </div>
-
-                                {products.length > 0 && (
-                                    <div className="bg-white rounded-lg shadow p-6">
-                                        <h3 className="font-bold mb-3">Sample Products:</h3>
-                                        <div className="space-y-2">
-                                            {products.slice(0, 5).map((p, i) => (
-                                                <div key={i} className="text-sm border-l-4 border-blue-500 pl-3 py-2">
-                                                    <div className="font-mono text-gray-600">{p.code}</div>
-                                                    <div className="font-semibold">{p.description}</div>
-                                                    <div className="text-gray-500">Pack Size: {p.packSize} units</div>
-                                                </div>
-                                            ))}
+                                            <div className="flex justify-between">
+                                                <span className="text-gray-600">Total Items:</span>
+                                                <span className="font-bold">{totalStats.total}</span>
+                                            </div>
+                                            <div className="flex justify-between">
+                                                <span className="text-green-600">Valid:</span>
+                                                <span className="font-bold text-green-600">{totalStats.valid}</span>
+                                            </div>
+                                            <div className="flex justify-between">
+                                                <span className="text-red-600">Errors:</span>
+                                                <span className="font-bold text-red-600">{totalStats.errors}</span>
+                                            </div>
+                                            <div className="flex justify-between">
+                                                <span className="text-yellow-600">Not Found:</span>
+                                                <span className="font-bold text-yellow-600">{totalStats.notFound}</span>
+                                            </div>
                                         </div>
                                     </div>
                                 )}
-                            </div>
-                        )}
 
-                        {page === 'scan' && (
-                            <div className="max-w-2xl mx-auto space-y-4">
-                                <div className="bg-white rounded-lg shadow p-6">
-                                    <label className="block text-sm font-semibold mb-2">Barcode / Product Code</label>
-                                    <div className="flex gap-2 mb-3">
-                                        <input
-                                            ref={barcodeInputRef}
-                                            type="text"
-                                            value={barcode}
-                                            onChange={(e) => setBarcode(e.target.value)}
-                                            onKeyPress={(e) => e.key === 'Enter' && handleBarcodeSubmit()}
-                                            placeholder="Scan or enter barcode"
-                                            className="flex-1 p-3 border-2 border-gray-300 rounded-lg text-lg font-mono"
-                                            autoFocus
-                                        />
-                                        <button
-                                            onClick={() => handleBarcodeSubmit()}
-                                            className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-                                        >
-                                            <i data-lucide="search"></i>
-                                        </button>
+                                {/* Count List */}
+                                <div className="bg-white rounded-lg shadow">
+                                    <div className="p-4 border-b">
+                                        <h3 className="font-bold">Uploaded Counts ({counts.length})</h3>
                                     </div>
-
-                                    {!scanning ? (
-                                        <button
-                                            onClick={startCamera}
-                                            className="w-full py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 font-semibold flex items-center justify-center gap-2"
-                                        >
-                                            <i data-lucide="camera"></i>
-                                            Use Camera to Scan Barcode
-                                        </button>
-                                    ) : (
-                                        <div>
-                                            <video
-                                                ref={videoRef}
-                                                className="w-full rounded-lg mb-2"
-                                                style={{ height: '240px', objectFit: 'cover' }}
-                                            />
-                                            <button
-                                                onClick={stopCamera}
-                                                className="w-full py-3 bg-red-600 text-white rounded-lg hover:bg-red-700 font-semibold flex items-center justify-center gap-2"
+                                    <div className="divide-y max-h-96 overflow-y-auto">
+                                        {counts.map(count => (
+                                            <div
+                                                key={count.id}
+                                                className={`p-3 cursor-pointer hover:bg-gray-50 ${
+                                                    selectedCount?.id === count.id ? 'bg-blue-50' : ''
+                                                }`}
+                                                onClick={() => setSelectedCount(count)}
                                             >
-                                                <i data-lucide="x"></i>
-                                                Stop Camera
-                                            </button>
-                                        </div>
-                                    )}
-                                </div>
-
-                                {error && (
-                                    <div className="bg-yellow-50 border-l-4 border-yellow-500 p-4 flex gap-3">
-                                        <i data-lucide="alert-circle" className="text-yellow-600 flex-shrink-0"></i>
-                                        <div className="text-yellow-800">{error}</div>
+                                                <div className="font-semibold text-sm">{count.personName}</div>
+                                                <div className="text-xs text-gray-600">Count #{count.countNumber}</div>
+                                                <div className="text-xs text-gray-500 mt-1">{count.uploadDate}</div>
+                                                <div className="flex gap-2 mt-2 text-xs">
+                                                    <span className="text-green-600">✓ {count.stats.valid}</span>
+                                                    <span className="text-red-600">✗ {count.stats.errors}</span>
+                                                    <span className="text-yellow-600">? {count.stats.notFound}</span>
+                                                </div>
+                                                <div className="flex gap-1 mt-2">
+                                                    <button
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            deleteCount(count.id);
+                                                        }}
+                                                        className="flex-1 px-2 py-1 bg-red-500 text-white rounded text-xs hover:bg-red-600"
+                                                    >
+                                                        Delete
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        ))}
+                                        {counts.length === 0 && (
+                                            <div className="p-8 text-center text-gray-500 text-sm">
+                                                No counts uploaded yet
+                                            </div>
+                                        )}
                                     </div>
-                                )}
+                                </div>
+                            </div>
 
-                                {currentProduct && (
-                                    <div className="bg-green-50 border-2 border-green-500 rounded-lg p-6">
-                                        <div className="flex items-start gap-3 mb-4">
-                                            <i data-lucide="package" className="w-12 h-12 text-green-600 flex-shrink-0"></i>
-                                            <div className="flex-1">
-                                                <div className="font-mono text-sm text-gray-600 mb-1">{currentProduct.code}</div>
-                                                <h3 className="text-xl font-bold text-gray-800 mb-2">{currentProduct.description}</h3>
-                                                <div className="text-sm">
-                                                    <span className="text-gray-600">Pack Size:</span>
-                                                    <span className="ml-2 font-semibold">{currentProduct.packSize} units</span>
+                            {/* Main Content Area */}
+                            <div className="col-span-9">
+                                {!selectedCount ? (
+                                    <div className="bg-white rounded-lg shadow p-12 text-center">
+                                        <i data-lucide="folder-open" className="w-24 h-24 text-gray-300 mx-auto mb-4"></i>
+                                        <h2 className="text-2xl font-bold text-gray-800 mb-2">No Count Selected</h2>
+                                        <p className="text-gray-600">Upload a new count or select one from the sidebar</p>
+                                    </div>
+                                ) : (
+                                    <>
+                                        {/* Count Header */}
+                                        <div className="bg-white rounded-lg shadow p-6 mb-4">
+                                            <div className="flex justify-between items-start mb-4">
+                                                <div>
+                                                    <h2 className="text-2xl font-bold">{selectedCount.personName} - Count #{selectedCount.countNumber}</h2>
+                                                    <p className="text-gray-600 text-sm mt-1">{selectedCount.uploadDate}</p>
+                                                </div>
+                                                <div className="flex gap-2">
+                                                    <button
+                                                        onClick={() => exportSingleCount(selectedCount)}
+                                                        className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2"
+                                                    >
+                                                        <i data-lucide="download"></i>
+                                                        Export Valid
+                                                    </button>
+                                                    <button
+                                                        onClick={() => exportErrors(selectedCount)}
+                                                        className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 flex items-center gap-2"
+                                                    >
+                                                        <i data-lucide="alert-triangle"></i>
+                                                        Export Errors
+                                                    </button>
+                                                </div>
+                                            </div>
+
+                                            {/* Stats */}
+                                            <div className="grid grid-cols-4 gap-3">
+                                                <div className="bg-gray-50 rounded p-3">
+                                                    <div className="text-xs text-gray-600">Total Items</div>
+                                                    <div className="text-2xl font-bold">{selectedCount.stats.total}</div>
+                                                </div>
+                                                <div className="bg-green-50 rounded p-3">
+                                                    <div className="text-xs text-green-700">Valid</div>
+                                                    <div className="text-2xl font-bold text-green-700">{selectedCount.stats.valid}</div>
+                                                </div>
+                                                <div className="bg-red-50 rounded p-3">
+                                                    <div className="text-xs text-red-700">Missing/Invalid Qty</div>
+                                                    <div className="text-2xl font-bold text-red-700">{selectedCount.stats.errors}</div>
+                                                </div>
+                                                <div className="bg-yellow-50 rounded p-3">
+                                                    <div className="text-xs text-yellow-700">Not Found</div>
+                                                    <div className="text-2xl font-bold text-yellow-700">{selectedCount.stats.notFound}</div>
                                                 </div>
                                             </div>
                                         </div>
 
-                                        <div className="border-t border-green-200 pt-4">
-                                            <label className="block text-sm font-semibold mb-2">Counted Quantity</label>
-                                            <div className="flex gap-2 items-stretch">
+                                        {/* Filters */}
+                                        <div className="bg-white rounded-lg shadow p-4 mb-4">
+                                            <div className="flex gap-3">
                                                 <input
-                                                    type="number"
-                                                    value={quantity}
-                                                    onChange={(e) => setQuantity(e.target.value)}
-                                                    onKeyPress={(e) => e.key === 'Enter' && handleAddCount()}
-                                                    placeholder="Enter quantity"
-                                                    className="w-32 p-3 border-2 border-gray-300 rounded-lg text-lg"
-                                                    min="1"
+                                                    type="text"
+                                                    value={searchTerm}
+                                                    onChange={(e) => setSearchTerm(e.target.value)}
+                                                    placeholder="Search barcode or description..."
+                                                    className="flex-1 p-2 border-2 border-gray-300 rounded-lg"
                                                 />
-                                                <button
-                                                    onClick={handleAddCount}
-                                                    className="flex-1 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 font-bold"
+                                                <select
+                                                    value={filterType}
+                                                    onChange={(e) => setFilterType(e.target.value)}
+                                                    className="p-2 border-2 border-gray-300 rounded-lg"
                                                 >
-                                                    Add
-                                                </button>
+                                                    <option value="all">All ({selectedCount.stats.total})</option>
+                                                    <option value="valid">Valid Only ({selectedCount.stats.valid})</option>
+                                                    <option value="errors">All Errors ({selectedCount.stats.errors + selectedCount.stats.notFound})</option>
+                                                    <option value="missing_qty">Missing Qty ({selectedCount.stats.errors})</option>
+                                                    <option value="not_found">Not Found ({selectedCount.stats.notFound})</option>
+                                                </select>
                                             </div>
                                         </div>
-                                    </div>
-                                )}
 
-                                {scannedItems.length > 0 && (
-                                    <div className="bg-white rounded-lg shadow p-6">
-                                        <h3 className="font-bold mb-3">Last 5 Scanned:</h3>
-                                        <div className="space-y-2">
-                                            {scannedItems.slice(0, 5).map(item => (
-                                                <div key={item.id} className="flex justify-between items-center border-l-4 border-blue-500 pl-3 py-2 bg-gray-50">
-                                                    <div className="flex-1">
-                                                        <div className="font-semibold text-sm">{item.description}</div>
-                                                        <div className="text-xs text-gray-500">{item.code} • {item.timestamp}</div>
+                                        {/* Items List */}
+                                        <div className="space-y-2 max-h-[600px] overflow-y-auto">
+                                            {filteredItems.map(item => (
+                                                <div key={item.id} className={`rounded-lg shadow p-4 border-l-4 ${getRowColor(item)}`}>
+                                                    <div className="flex items-start gap-3">
+                                                        <div className="flex-1">
+                                                            <div className="flex items-center gap-2 mb-1">
+                                                                <span className="text-xs bg-gray-200 px-2 py-1 rounded">Line {item.lineNumber}</span>
+                                                                <span className="font-mono text-sm">{item.originalBarcode}</span>
+                                                                {item.errorType && (
+                                                                    <i data-lucide="alert-circle" className="w-5 h-5 text-red-600"></i>
+                                                                )}
+                                                            </div>
+                                                            <div className="font-semibold text-lg">{item.description}</div>
+                                                            <div className="text-sm text-gray-600">Pack Size: {item.packSize}</div>
+                                                            {item.errorMessage && (
+                                                                <div className="mt-2 text-sm font-semibold text-red-700">
+                                                                    ⚠️ {item.errorMessage}
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                        <div className="text-right">
+                                                            <div className="text-xs text-gray-600 mb-1">Counted:</div>
+                                                            <div className={`text-3xl font-bold ${
+                                                                item.errorType ? 'text-red-600' : 'text-green-600'
+                                                            }`}>
+                                                                {item.quantity || '?'}
+                                                            </div>
+                                                        </div>
                                                     </div>
-                                                    <div className="text-xl font-bold text-blue-600 mr-2">{item.quantity}</div>
                                                 </div>
                                             ))}
                                         </div>
-                                    </div>
+                                    </>
                                 )}
                             </div>
-                        )}
+                        </div>
+                    </div>
 
-                        {page === 'history' && (
-                            <div className="max-w-4xl mx-auto space-y-4">
-                                <div className="bg-white rounded-lg shadow p-4">
-                                    <div className="flex flex-col gap-2 mb-4">
+                    {/* Upload Modal */}
+                    {showUploadModal && (
+                        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                            <div className="bg-white rounded-lg shadow-xl p-6 max-w-md w-full mx-4">
+                                <h2 className="text-2xl font-bold mb-4">Upload New Count</h2>
+                                
+                                <div className="space-y-4">
+                                    <div>
+                                        <label className="block text-sm font-semibold mb-2">Person Name</label>
                                         <input
                                             type="text"
-                                            value={searchTerm}
-                                            onChange={(e) => setSearchTerm(e.target.value)}
-                                            placeholder="Search by product or barcode..."
+                                            value={personName}
+                                            onChange={(e) => setPersonName(e.target.value)}
+                                            placeholder="e.g., John, Mary, etc."
                                             className="w-full p-3 border-2 border-gray-300 rounded-lg"
                                         />
-                                        <button
-                                            onClick={handleExport}
-                                            className="w-full py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 flex items-center justify-center gap-2 font-semibold"
-                                        >
-                                            <i data-lucide="download"></i>
-                                            Export
-                                        </button>
                                     </div>
 
-                                    <div className="flex justify-between items-center mb-4">
-                                        <div className="text-sm text-gray-600">
-                                            Total Items: {filteredItems.length}
-                                        </div>
+                                    <div>
+                                        <label className="block text-sm font-semibold mb-2">Count Number</label>
+                                        <input
+                                            type="number"
+                                            value={countNumber}
+                                            onChange={(e) => setCountNumber(e.target.value)}
+                                            placeholder="1, 2, 3..."
+                                            className="w-full p-3 border-2 border-gray-300 rounded-lg"
+                                            min="1"
+                                        />
+                                    </div>
+
+                                    <div>
+                                        <label className="block text-sm font-semibold mb-2">Select Count File (.txt)</label>
+                                        <input
+                                            type="file"
+                                            accept=".txt,.csv"
+                                            onChange={handleFileUpload}
+                                            className="w-full p-2 border-2 border-gray-300 rounded-lg"
+                                        />
+                                    </div>
+
+                                    <div className="flex gap-2 mt-6">
                                         <button
-                                            onClick={clearAllData}
-                                            className="text-red-600 hover:text-red-700 text-sm flex items-center gap-1"
+                                            onClick={() => {
+                                                setShowUploadModal(false);
+                                                setPersonName('');
+                                                setCountNumber('1');
+                                            }}
+                                            className="flex-1 py-2 bg-gray-300 text-gray-800 rounded-lg hover:bg-gray-400"
                                         >
-                                            <i data-lucide="trash-2"></i>
-                                            Clear All
+                                            Cancel
                                         </button>
                                     </div>
-                                </div>
-
-                                <div className="space-y-2">
-                                    {filteredItems.map(item => (
-                                        <div key={item.id} className="bg-white rounded-lg shadow p-4">
-                                            <div className="flex items-start gap-3">
-                                                <div className="flex-1">
-                                                    <div className="font-mono text-xs text-gray-500 mb-1">{item.code}</div>
-                                                    <div className="font-semibold mb-1">{item.description}</div>
-                                                    <div className="text-sm text-gray-600">
-                                                        Pack Size: {item.packSize} • {item.timestamp}
-                                                    </div>
-                                                </div>
-
-                                                <div className="flex items-center gap-2">
-                                                    {editingId === item.id ? (
-                                                        <>
-                                                            <input
-                                                                type="number"
-                                                                value={editQuantity}
-                                                                onChange={(e) => setEditQuantity(e.target.value)}
-                                                                className="w-20 p-2 border-2 border-blue-500 rounded text-center"
-                                                                autoFocus
-                                                            />
-                                                            <button
-                                                                onClick={() => handleEdit(item.id, editQuantity)}
-                                                                className="p-2 bg-green-600 text-white rounded hover:bg-green-700"
-                                                            >
-                                                                <i data-lucide="check"></i>
-                                                            </button>
-                                                            <button
-                                                                onClick={() => setEditingId(null)}
-                                                                className="p-2 bg-gray-400 text-white rounded hover:bg-gray-500"
-                                                            >
-                                                                <i data-lucide="x"></i>
-                                                            </button>
-                                                        </>
-                                                    ) : (
-                                                        <>
-                                                            <div className="text-2xl font-bold text-blue-600 min-w-[60px] text-right">
-                                                                {item.quantity}
-                                                            </div>
-                                                            <button
-                                                                onClick={() => {
-                                                                    setEditingId(item.id);
-                                                                    setEditQuantity(item.quantity.toString());
-                                                                }}
-                                                                className="p-2 text-blue-600 hover:bg-blue-50 rounded"
-                                                            >
-                                                                <i data-lucide="edit-2"></i>
-                                                            </button>
-                                                            <button
-                                                                onClick={() => handleDelete(item.id)}
-                                                                className="p-2 text-red-600 hover:bg-red-50 rounded"
-                                                            >
-                                                                <i data-lucide="trash-2"></i>
-                                                            </button>
-                                                        </>
-                                                    )}
-                                                </div>
-                                            </div>
-                                        </div>
-                                    ))}
-
-                                    {filteredItems.length === 0 && (
-                                        <div className="bg-white rounded-lg shadow p-12 text-center text-gray-500">
-                                            No items scanned yet
-                                        </div>
-                                    )}
                                 </div>
                             </div>
-                        )}
-                    </div>
+                        </div>
+                    )}
                 </div>
             );
         }
 
-        ReactDOM.render(<StockTakeApp />, document.getElementById('root'));
+        ReactDOM.render(<StockReviewApp />, document.getElementById('root'));
     </script>
 </body>
 </html>
