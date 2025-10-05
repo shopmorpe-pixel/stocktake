@@ -16,30 +16,21 @@
     <script type="text/babel">
         const { useState, useEffect } = React;
 
-        // NO AUTO-LOAD - Manual upload only for desktop review
-        const CLOUD_CSV_URL = null;
-
         function StockReviewApp() {
             const [products, setProducts] = useState([]);
             const [counts, setCounts] = useState([]);
             const [selectedCount, setSelectedCount] = useState(null);
-            const [loading, setLoading] = useState(true);
             const [error, setError] = useState('');
             const [searchTerm, setSearchTerm] = useState('');
             const [filterType, setFilterType] = useState('all');
             const [showUploadModal, setShowUploadModal] = useState(false);
+            const [showDatabaseModal, setShowDatabaseModal] = useState(false);
             const [personName, setPersonName] = useState('');
             const [countNumber, setCountNumber] = useState('1');
 
             useEffect(() => {
-                loadProductDatabase();
                 loadSavedCounts();
             }, []);
-
-            const loadProductDatabase = async () => {
-                // Manual upload only - no auto-load for desktop review app
-                setLoading(false);
-            };
 
             const loadSavedCounts = () => {
                 const saved = localStorage.getItem('stock_review_counts');
@@ -50,6 +41,39 @@
 
             const saveCounts = (newCounts) => {
                 localStorage.setItem('stock_review_counts', JSON.stringify(newCounts));
+            };
+
+            const handleDatabaseUpload = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    try {
+                        const text = event.target.result;
+                        const lines = text.split('\n').filter(line => line.trim());
+
+                        const data = [];
+                        for (let i = 0; i < lines.length; i++) {
+                            const values = lines[i].split(',').map(v => v.trim());
+                            if (values.length >= 3) {
+                                data.push({
+                                    code: values[0],
+                                    packSize: values[1],
+                                    description: values[2]
+                                });
+                            }
+                        }
+
+                        setProducts(data);
+                        setShowDatabaseModal(false);
+                        setError('');
+                        alert(`Database loaded: ${data.length} products`);
+                    } catch (err) {
+                        setError('Error loading database');
+                    }
+                };
+                reader.readAsText(file);
             };
 
             const processCountFile = (text, personName, countNumber) => {
@@ -120,44 +144,17 @@
                 };
             };
 
-            const handleDatabaseUpload = (e) => {
-                const file = e.target.files[0];
-                if (!file) return;
-
-                const reader = new FileReader();
-                reader.onload = (event) => {
-                    try {
-                        const text = event.target.result;
-                        const lines = text.split('\n').filter(line => line.trim());
-
-                        const data = [];
-                        for (let i = 0; i < lines.length; i++) {
-                            const values = lines[i].split(',').map(v => v.trim());
-                            if (values.length >= 3) {
-                                data.push({
-                                    code: values[0],
-                                    packSize: values[1],
-                                    description: values[2]
-                                });
-                            }
-                        }
-
-                        setProducts(data);
-                        setError('');
-                        alert(`Database loaded: ${data.length} products`);
-                    } catch (err) {
-                        setError('Error loading database');
-                    }
-                };
-                reader.readAsText(file);
-            };
-
             const handleFileUpload = (e) => {
                 const file = e.target.files[0];
                 if (!file) return;
 
                 if (!personName.trim()) {
                     alert('Please enter person name');
+                    return;
+                }
+
+                if (products.length === 0) {
+                    alert('Please upload product database first');
                     return;
                 }
 
@@ -195,7 +192,6 @@
                     return;
                 }
 
-                // Combine all valid items from all counts
                 const allItems = {};
                 
                 counts.forEach(count => {
@@ -305,19 +301,6 @@
                 lucide.createIcons();
             });
 
-            if (loading) {
-                return (
-                    <div className="min-h-screen bg-gray-100 flex items-center justify-center">
-                        <div className="text-center">
-                            <div className="mb-4">
-                                <i data-lucide="loader" className="w-16 h-16 text-blue-600 mx-auto animate-spin"></i>
-                            </div>
-                            <h2 className="text-2xl font-bold text-gray-800">Loading...</h2>
-                        </div>
-                    </div>
-                );
-            }
-
             const filteredItems = getFilteredItems();
             const totalStats = getTotalStats();
 
@@ -327,235 +310,252 @@
                         <div className="max-w-7xl mx-auto flex justify-between items-center">
                             <div>
                                 <h1 className="text-3xl font-bold">Stock Count Review System</h1>
-                                <p className="text-blue-100 mt-1">Manage multiple counts and validate stock takes</p>
+                                <p className="text-blue-100 mt-1">Desktop - Manual Database Upload</p>
                             </div>
                             <div className="text-right">
                                 <div className="text-sm text-blue-100">Product Database</div>
-                                <div className="text-2xl font-bold">{products.length} products</div>
+                                <div className="text-2xl font-bold">
+                                    {products.length > 0 ? `${products.length} products` : 'Not loaded'}
+                                </div>
+                                {products.length === 0 && (
+                                    <button
+                                        onClick={() => setShowDatabaseModal(true)}
+                                        className="mt-2 px-4 py-2 bg-white text-blue-600 rounded hover:bg-blue-50 text-sm font-semibold"
+                                    >
+                                        Upload Database
+                                    </button>
+                                )}
                             </div>
                         </div>
                     </div>
 
                     <div className="max-w-7xl mx-auto p-6">
-                        <div className="grid grid-cols-12 gap-6">
-                            {/* Left Sidebar - Count List */}
-                            <div className="col-span-3 space-y-4">
+                        {products.length === 0 ? (
+                            <div className="bg-white rounded-lg shadow p-12 text-center">
+                                <i data-lucide="database" className="w-24 h-24 text-gray-300 mx-auto mb-4"></i>
+                                <h2 className="text-2xl font-bold text-gray-800 mb-2">No Product Database Loaded</h2>
+                                <p className="text-gray-600 mb-6">Please upload your master product CSV file first</p>
                                 <button
-                                    onClick={() => setShowUploadModal(true)}
-                                    className="w-full py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 font-semibold flex items-center justify-center gap-2"
+                                    onClick={() => setShowDatabaseModal(true)}
+                                    className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-semibold"
                                 >
-                                    <i data-lucide="plus"></i>
-                                    Upload New Count
+                                    Upload Product Database
                                 </button>
-
-                                {counts.length > 0 && (
+                            </div>
+                        ) : (
+                            <div className="grid grid-cols-12 gap-6">
+                                {/* Left Sidebar */}
+                                <div className="col-span-3 space-y-4">
                                     <button
-                                        onClick={exportAllCounts}
-                                        className="w-full py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-semibold flex items-center justify-center gap-2"
+                                        onClick={() => setShowUploadModal(true)}
+                                        className="w-full py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 font-semibold flex items-center justify-center gap-2"
                                     >
-                                        <i data-lucide="download"></i>
-                                        Export All (Merged)
+                                        <i data-lucide="plus"></i>
+                                        Upload Count
                                     </button>
-                                )}
 
-                                {/* Overall Stats */}
-                                {counts.length > 0 && (
-                                    <div className="bg-white rounded-lg shadow p-4">
-                                        <h3 className="font-bold mb-3">Overall Statistics</h3>
-                                        <div className="space-y-2 text-sm">
-                                            <div className="flex justify-between">
-                                                <span className="text-gray-600">Total Counts:</span>
-                                                <span className="font-bold">{counts.length}</span>
-                                            </div>
-                                            <div className="flex justify-between">
-                                                <span className="text-gray-600">Total Items:</span>
-                                                <span className="font-bold">{totalStats.total}</span>
-                                            </div>
-                                            <div className="flex justify-between">
-                                                <span className="text-green-600">Valid:</span>
-                                                <span className="font-bold text-green-600">{totalStats.valid}</span>
-                                            </div>
-                                            <div className="flex justify-between">
-                                                <span className="text-red-600">Errors:</span>
-                                                <span className="font-bold text-red-600">{totalStats.errors}</span>
-                                            </div>
-                                            <div className="flex justify-between">
-                                                <span className="text-yellow-600">Not Found:</span>
-                                                <span className="font-bold text-yellow-600">{totalStats.notFound}</span>
+                                    {counts.length > 0 && (
+                                        <button
+                                            onClick={exportAllCounts}
+                                            className="w-full py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-semibold flex items-center justify-center gap-2"
+                                        >
+                                            <i data-lucide="download"></i>
+                                            Export All
+                                        </button>
+                                    )}
+
+                                    <button
+                                        onClick={() => setShowDatabaseModal(true)}
+                                        className="w-full py-3 bg-gray-600 text-white rounded-lg hover:bg-gray-700 font-semibold flex items-center justify-center gap-2"
+                                    >
+                                        <i data-lucide="refresh-cw"></i>
+                                        Reload Database
+                                    </button>
+
+                                    {counts.length > 0 && (
+                                        <div className="bg-white rounded-lg shadow p-4">
+                                            <h3 className="font-bold mb-3">Overall Stats</h3>
+                                            <div className="space-y-2 text-sm">
+                                                <div className="flex justify-between">
+                                                    <span>Counts:</span>
+                                                    <span className="font-bold">{counts.length}</span>
+                                                </div>
+                                                <div className="flex justify-between">
+                                                    <span>Total Items:</span>
+                                                    <span className="font-bold">{totalStats.total}</span>
+                                                </div>
+                                                <div className="flex justify-between text-green-600">
+                                                    <span>Valid:</span>
+                                                    <span className="font-bold">{totalStats.valid}</span>
+                                                </div>
+                                                <div className="flex justify-between text-red-600">
+                                                    <span>Errors:</span>
+                                                    <span className="font-bold">{totalStats.errors}</span>
+                                                </div>
+                                                <div className="flex justify-between text-yellow-600">
+                                                    <span>Not Found:</span>
+                                                    <span className="font-bold">{totalStats.notFound}</span>
+                                                </div>
                                             </div>
                                         </div>
-                                    </div>
-                                )}
+                                    )}
 
-                                {/* Count List */}
-                                <div className="bg-white rounded-lg shadow">
-                                    <div className="p-4 border-b">
-                                        <h3 className="font-bold">Uploaded Counts ({counts.length})</h3>
-                                    </div>
-                                    <div className="divide-y max-h-96 overflow-y-auto">
-                                        {counts.map(count => (
-                                            <div
-                                                key={count.id}
-                                                className={`p-3 cursor-pointer hover:bg-gray-50 ${
-                                                    selectedCount?.id === count.id ? 'bg-blue-50' : ''
-                                                }`}
-                                                onClick={() => setSelectedCount(count)}
-                                            >
-                                                <div className="font-semibold text-sm">{count.personName}</div>
-                                                <div className="text-xs text-gray-600">Count #{count.countNumber}</div>
-                                                <div className="text-xs text-gray-500 mt-1">{count.uploadDate}</div>
-                                                <div className="flex gap-2 mt-2 text-xs">
-                                                    <span className="text-green-600">✓ {count.stats.valid}</span>
-                                                    <span className="text-red-600">✗ {count.stats.errors}</span>
-                                                    <span className="text-yellow-600">? {count.stats.notFound}</span>
-                                                </div>
-                                                <div className="flex gap-1 mt-2">
+                                    <div className="bg-white rounded-lg shadow">
+                                        <div className="p-4 border-b">
+                                            <h3 className="font-bold">Counts ({counts.length})</h3>
+                                        </div>
+                                        <div className="divide-y max-h-96 overflow-y-auto">
+                                            {counts.map(count => (
+                                                <div
+                                                    key={count.id}
+                                                    className={`p-3 cursor-pointer hover:bg-gray-50 ${
+                                                        selectedCount?.id === count.id ? 'bg-blue-50' : ''
+                                                    }`}
+                                                    onClick={() => setSelectedCount(count)}
+                                                >
+                                                    <div className="font-semibold text-sm">{count.personName}</div>
+                                                    <div className="text-xs text-gray-600">Count #{count.countNumber}</div>
+                                                    <div className="text-xs text-gray-500 mt-1">{count.uploadDate}</div>
+                                                    <div className="flex gap-2 mt-2 text-xs">
+                                                        <span className="text-green-600">✓ {count.stats.valid}</span>
+                                                        <span className="text-red-600">✗ {count.stats.errors}</span>
+                                                        <span className="text-yellow-600">? {count.stats.notFound}</span>
+                                                    </div>
                                                     <button
                                                         onClick={(e) => {
                                                             e.stopPropagation();
                                                             deleteCount(count.id);
                                                         }}
-                                                        className="flex-1 px-2 py-1 bg-red-500 text-white rounded text-xs hover:bg-red-600"
+                                                        className="w-full mt-2 px-2 py-1 bg-red-500 text-white rounded text-xs hover:bg-red-600"
                                                     >
                                                         Delete
                                                     </button>
                                                 </div>
-                                            </div>
-                                        ))}
-                                        {counts.length === 0 && (
-                                            <div className="p-8 text-center text-gray-500 text-sm">
-                                                No counts uploaded yet
-                                            </div>
-                                        )}
+                                            ))}
+                                            {counts.length === 0 && (
+                                                <div className="p-8 text-center text-gray-500 text-sm">
+                                                    No counts yet
+                                                </div>
+                                            )}
+                                        </div>
                                     </div>
                                 </div>
-                            </div>
 
-                            {/* Main Content Area */}
-                            <div className="col-span-9">
-                                {!selectedCount ? (
-                                    <div className="bg-white rounded-lg shadow p-12 text-center">
-                                        <i data-lucide="folder-open" className="w-24 h-24 text-gray-300 mx-auto mb-4"></i>
-                                        <h2 className="text-2xl font-bold text-gray-800 mb-2">No Count Selected</h2>
-                                        <p className="text-gray-600">Upload a new count or select one from the sidebar</p>
-                                    </div>
-                                ) : (
-                                    <>
-                                        {/* Count Header */}
-                                        <div className="bg-white rounded-lg shadow p-6 mb-4">
-                                            <div className="flex justify-between items-start mb-4">
-                                                <div>
-                                                    <h2 className="text-2xl font-bold">{selectedCount.personName} - Count #{selectedCount.countNumber}</h2>
-                                                    <p className="text-gray-600 text-sm mt-1">{selectedCount.uploadDate}</p>
-                                                </div>
-                                                <div className="flex gap-2">
-                                                    <button
-                                                        onClick={() => exportSingleCount(selectedCount)}
-                                                        className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2"
-                                                    >
-                                                        <i data-lucide="download"></i>
-                                                        Export Valid
-                                                    </button>
-                                                    <button
-                                                        onClick={() => exportErrors(selectedCount)}
-                                                        className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 flex items-center gap-2"
-                                                    >
-                                                        <i data-lucide="alert-triangle"></i>
-                                                        Export Errors
-                                                    </button>
-                                                </div>
-                                            </div>
-
-                                            {/* Stats */}
-                                            <div className="grid grid-cols-4 gap-3">
-                                                <div className="bg-gray-50 rounded p-3">
-                                                    <div className="text-xs text-gray-600">Total Items</div>
-                                                    <div className="text-2xl font-bold">{selectedCount.stats.total}</div>
-                                                </div>
-                                                <div className="bg-green-50 rounded p-3">
-                                                    <div className="text-xs text-green-700">Valid</div>
-                                                    <div className="text-2xl font-bold text-green-700">{selectedCount.stats.valid}</div>
-                                                </div>
-                                                <div className="bg-red-50 rounded p-3">
-                                                    <div className="text-xs text-red-700">Missing/Invalid Qty</div>
-                                                    <div className="text-2xl font-bold text-red-700">{selectedCount.stats.errors}</div>
-                                                </div>
-                                                <div className="bg-yellow-50 rounded p-3">
-                                                    <div className="text-xs text-yellow-700">Not Found</div>
-                                                    <div className="text-2xl font-bold text-yellow-700">{selectedCount.stats.notFound}</div>
-                                                </div>
-                                            </div>
+                                {/* Main Content */}
+                                <div className="col-span-9">
+                                    {!selectedCount ? (
+                                        <div className="bg-white rounded-lg shadow p-12 text-center">
+                                            <i data-lucide="folder-open" className="w-24 h-24 text-gray-300 mx-auto mb-4"></i>
+                                            <h2 className="text-2xl font-bold text-gray-800 mb-2">No Count Selected</h2>
+                                            <p className="text-gray-600">Upload a count or select from sidebar</p>
                                         </div>
+                                    ) : (
+                                        <>
+                                            <div className="bg-white rounded-lg shadow p-6 mb-4">
+                                                <div className="flex justify-between items-start mb-4">
+                                                    <div>
+                                                        <h2 className="text-2xl font-bold">{selectedCount.personName} - Count #{selectedCount.countNumber}</h2>
+                                                        <p className="text-gray-600 text-sm">{selectedCount.uploadDate}</p>
+                                                    </div>
+                                                    <div className="flex gap-2">
+                                                        <button
+                                                            onClick={() => exportSingleCount(selectedCount)}
+                                                            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                                                        >
+                                                            Export Valid
+                                                        </button>
+                                                        <button
+                                                            onClick={() => exportErrors(selectedCount)}
+                                                            className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
+                                                        >
+                                                            Export Errors
+                                                        </button>
+                                                    </div>
+                                                </div>
 
-                                        {/* Filters */}
-                                        <div className="bg-white rounded-lg shadow p-4 mb-4">
-                                            <div className="flex gap-3">
-                                                <input
-                                                    type="text"
-                                                    value={searchTerm}
-                                                    onChange={(e) => setSearchTerm(e.target.value)}
-                                                    placeholder="Search barcode or description..."
-                                                    className="flex-1 p-2 border-2 border-gray-300 rounded-lg"
-                                                />
-                                                <select
-                                                    value={filterType}
-                                                    onChange={(e) => setFilterType(e.target.value)}
-                                                    className="p-2 border-2 border-gray-300 rounded-lg"
-                                                >
-                                                    <option value="all">All ({selectedCount.stats.total})</option>
-                                                    <option value="valid">Valid Only ({selectedCount.stats.valid})</option>
-                                                    <option value="errors">All Errors ({selectedCount.stats.errors + selectedCount.stats.notFound})</option>
-                                                    <option value="missing_qty">Missing Qty ({selectedCount.stats.errors})</option>
-                                                    <option value="not_found">Not Found ({selectedCount.stats.notFound})</option>
-                                                </select>
+                                                <div className="grid grid-cols-4 gap-3">
+                                                    <div className="bg-gray-50 rounded p-3">
+                                                        <div className="text-xs">Total</div>
+                                                        <div className="text-2xl font-bold">{selectedCount.stats.total}</div>
+                                                    </div>
+                                                    <div className="bg-green-50 rounded p-3">
+                                                        <div className="text-xs text-green-700">Valid</div>
+                                                        <div className="text-2xl font-bold text-green-700">{selectedCount.stats.valid}</div>
+                                                    </div>
+                                                    <div className="bg-red-50 rounded p-3">
+                                                        <div className="text-xs text-red-700">Errors</div>
+                                                        <div className="text-2xl font-bold text-red-700">{selectedCount.stats.errors}</div>
+                                                    </div>
+                                                    <div className="bg-yellow-50 rounded p-3">
+                                                        <div className="text-xs text-yellow-700">Not Found</div>
+                                                        <div className="text-2xl font-bold text-yellow-700">{selectedCount.stats.notFound}</div>
+                                                    </div>
+                                                </div>
                                             </div>
-                                        </div>
 
-                                        {/* Items List */}
-                                        <div className="space-y-2 max-h-[600px] overflow-y-auto">
-                                            {filteredItems.map(item => (
-                                                <div key={item.id} className={`rounded-lg shadow p-4 border-l-4 ${getRowColor(item)}`}>
-                                                    <div className="flex items-start gap-3">
-                                                        <div className="flex-1">
-                                                            <div className="flex items-center gap-2 mb-1">
-                                                                <span className="text-xs bg-gray-200 px-2 py-1 rounded">Line {item.lineNumber}</span>
-                                                                <span className="font-mono text-sm">{item.originalBarcode}</span>
-                                                                {item.errorType && (
-                                                                    <i data-lucide="alert-circle" className="w-5 h-5 text-red-600"></i>
+                                            <div className="bg-white rounded-lg shadow p-4 mb-4">
+                                                <div className="flex gap-3">
+                                                    <input
+                                                        type="text"
+                                                        value={searchTerm}
+                                                        onChange={(e) => setSearchTerm(e.target.value)}
+                                                        placeholder="Search..."
+                                                        className="flex-1 p-2 border-2 border-gray-300 rounded-lg"
+                                                    />
+                                                    <select
+                                                        value={filterType}
+                                                        onChange={(e) => setFilterType(e.target.value)}
+                                                        className="p-2 border-2 border-gray-300 rounded-lg"
+                                                    >
+                                                        <option value="all">All</option>
+                                                        <option value="valid">Valid</option>
+                                                        <option value="errors">Errors</option>
+                                                        <option value="missing_qty">Missing Qty</option>
+                                                        <option value="not_found">Not Found</option>
+                                                    </select>
+                                                </div>
+                                            </div>
+
+                                            <div className="space-y-2 max-h-[600px] overflow-y-auto">
+                                                {filteredItems.map(item => (
+                                                    <div key={item.id} className={`rounded-lg shadow p-4 border-l-4 ${getRowColor(item)}`}>
+                                                        <div className="flex justify-between">
+                                                            <div className="flex-1">
+                                                                <div className="text-xs text-gray-500 mb-1">
+                                                                    Line {item.lineNumber} • {item.originalBarcode}
+                                                                </div>
+                                                                <div className="font-semibold text-lg">{item.description}</div>
+                                                                <div className="text-sm text-gray-600">Pack: {item.packSize}</div>
+                                                                {item.errorMessage && (
+                                                                    <div className="mt-2 text-sm font-semibold text-red-700">
+                                                                        ⚠️ {item.errorMessage}
+                                                                    </div>
                                                                 )}
                                                             </div>
-                                                            <div className="font-semibold text-lg">{item.description}</div>
-                                                            <div className="text-sm text-gray-600">Pack Size: {item.packSize}</div>
-                                                            {item.errorMessage && (
-                                                                <div className="mt-2 text-sm font-semibold text-red-700">
-                                                                    ⚠️ {item.errorMessage}
+                                                            <div className="text-right">
+                                                                <div className="text-xs text-gray-600">Qty:</div>
+                                                                <div className={`text-3xl font-bold ${
+                                                                    item.errorType ? 'text-red-600' : 'text-green-600'
+                                                                }`}>
+                                                                    {item.quantity || '?'}
                                                                 </div>
-                                                            )}
-                                                        </div>
-                                                        <div className="text-right">
-                                                            <div className="text-xs text-gray-600 mb-1">Counted:</div>
-                                                            <div className={`text-3xl font-bold ${
-                                                                item.errorType ? 'text-red-600' : 'text-green-600'
-                                                            }`}>
-                                                                {item.quantity || '?'}
                                                             </div>
                                                         </div>
                                                     </div>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    </>
-                                )}
+                                                ))}
+                                            </div>
+                                        </>
+                                    )}
+                                </div>
                             </div>
-                        </div>
+                        )}
                     </div>
 
-                    {/* Upload Modal */}
+                    {/* Upload Count Modal */}
                     {showUploadModal && (
                         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
                             <div className="bg-white rounded-lg shadow-xl p-6 max-w-md w-full mx-4">
-                                <h2 className="text-2xl font-bold mb-4">Upload New Count</h2>
-                                
+                                <h2 className="text-2xl font-bold mb-4">Upload Count</h2>
                                 <div className="space-y-4">
                                     <div>
                                         <label className="block text-sm font-semibold mb-2">Person Name</label>
@@ -563,25 +563,22 @@
                                             type="text"
                                             value={personName}
                                             onChange={(e) => setPersonName(e.target.value)}
-                                            placeholder="e.g., John, Mary, etc."
+                                            placeholder="e.g., John"
                                             className="w-full p-3 border-2 border-gray-300 rounded-lg"
                                         />
                                     </div>
-
                                     <div>
                                         <label className="block text-sm font-semibold mb-2">Count Number</label>
                                         <input
                                             type="number"
                                             value={countNumber}
                                             onChange={(e) => setCountNumber(e.target.value)}
-                                            placeholder="1, 2, 3..."
                                             className="w-full p-3 border-2 border-gray-300 rounded-lg"
                                             min="1"
                                         />
                                     </div>
-
                                     <div>
-                                        <label className="block text-sm font-semibold mb-2">Select Count File (.txt)</label>
+                                        <label className="block text-sm font-semibold mb-2">Count File (.txt)</label>
                                         <input
                                             type="file"
                                             accept=".txt,.csv"
@@ -589,20 +586,39 @@
                                             className="w-full p-2 border-2 border-gray-300 rounded-lg"
                                         />
                                     </div>
-
-                                    <div className="flex gap-2 mt-6">
-                                        <button
-                                            onClick={() => {
-                                                setShowUploadModal(false);
-                                                setPersonName('');
-                                                setCountNumber('1');
-                                            }}
-                                            className="flex-1 py-2 bg-gray-300 text-gray-800 rounded-lg hover:bg-gray-400"
-                                        >
-                                            Cancel
-                                        </button>
-                                    </div>
+                                    <button
+                                        onClick={() => {
+                                            setShowUploadModal(false);
+                                            setPersonName('');
+                                            setCountNumber('1');
+                                        }}
+                                        className="w-full py-2 bg-gray-300 text-gray-800 rounded-lg hover:bg-gray-400"
+                                    >
+                                        Cancel
+                                    </button>
                                 </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Upload Database Modal */}
+                    {showDatabaseModal && (
+                        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                            <div className="bg-white rounded-lg shadow-xl p-6 max-w-md w-full mx-4">
+                                <h2 className="text-2xl font-bold mb-4">Upload Product Database</h2>
+                                <p className="text-gray-600 mb-4">Upload your master product CSV (barcode,packsize,description)</p>
+                                <input
+                                    type="file"
+                                    accept=".csv,.txt"
+                                    onChange={handleDatabaseUpload}
+                                    className="w-full p-2 border-2 border-gray-300 rounded-lg mb-4"
+                                />
+                                <button
+                                    onClick={() => setShowDatabaseModal(false)}
+                                    className="w-full py-2 bg-gray-300 text-gray-800 rounded-lg hover:bg-gray-400"
+                                >
+                                    Cancel
+                                </button>
                             </div>
                         </div>
                     )}
